@@ -1,0 +1,12 @@
+appId: com.hardwatch.app
+productName: HardWatch
+directories:
+  buildResources: resources
+files:
+  - out/**/*
+win:
+  target: nsis
+  requestedExecutionLevel: requireAdministrator
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

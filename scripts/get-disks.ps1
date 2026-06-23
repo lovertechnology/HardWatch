@@ -1,0 +1,1 @@
+Get-CimInstance Win32_LogicalDisk | Where-Object {$_.DriveType -eq 3} | Select-Object DeviceID,VolumeName | ConvertTo-Json
