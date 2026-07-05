@@ -1,7 +1,8 @@
+import { app } from 'electron'
 import { appendFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 
-const LOG_DIR = join(__dirname, '../../logs')
+const LOG_DIR = join(app.getPath('userData'), 'logs')
 
 export enum LogLevel {
   DEBUG = 'DEBUG',

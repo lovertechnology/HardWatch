@@ -2,11 +2,10 @@ appId: com.hardwatch.app
 productName: HardWatch
 directories:
   buildResources: resources
+  output: release/v3
 files:
   - out/**/*
 win:
-  target: nsis
+  target: dir
   requestedExecutionLevel: requireAdministrator
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
+  signAndEditExecutable: false

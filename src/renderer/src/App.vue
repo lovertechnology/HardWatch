@@ -5,7 +5,12 @@ import SpeedCard from './components/SpeedCard.vue'
 import SpeedChart from './components/SpeedChart.vue'
 import ProcessList from './components/ProcessList.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
-import type { DiskInfo, DiskData } from './env'
+import StatsToolbar from './components/StatsToolbar.vue'
+import StatsSummaryCard from './components/StatsSummaryCard.vue'
+import StatsChart from './components/StatsChart.vue'
+import StatsProcessList from './components/StatsProcessList.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
+import type { DiskInfo, DiskData, TotalStatsData } from './env'
 
 const disks = ref<DiskInfo[]>([])
 const selectedDisk = ref('')
@@ -17,6 +22,15 @@ const currentInterval = ref(2)
 let unsubscribe: (() => void) | null = null
 
 const MAX_HISTORY = 60
+
+// Tab 切换
+const activeTab = ref<'realtime' | 'total'>('realtime')
+
+// 总量统计
+const statsData = ref<TotalStatsData | null>(null)
+const selectedRange = ref('1d')
+const showClearConfirm = ref(false)
+const statsLoading = ref(false)
 
 const readSpeed = computed(() => diskData.value?.readSpeed ?? 0)
 const writeSpeed = computed(() => diskData.value?.writeSpeed ?? 0)
@@ -74,6 +88,35 @@ async function onSettingsConfirm(sec: number) {
   currentInterval.value = sec
   await window.api.updateInterval(sec)
 }
+
+// 总量统计
+async function loadStats() {
+  statsLoading.value = true
+  try {
+    statsData.value = await window.api.queryStats(selectedRange.value)
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+async function onTabChange(tab: 'realtime' | 'total') {
+  activeTab.value = tab
+  if (tab === 'total' && !statsData.value) {
+    await loadStats()
+  }
+}
+
+async function onRangeChange(range: string) {
+  selectedRange.value = range
+  await loadStats()
+}
+
+async function onClearStats() {
+  const success = await window.api.clearStats()
+  if (success) {
+    await loadStats()
+  }
+}
 </script>
 
 <template>
@@ -101,33 +144,83 @@ async function onSettingsConfirm(sec: number) {
       />
     </header>
 
-    <!-- 速度卡片 -->
-    <div class="speed-cards">
-      <SpeedCard
-        label="读取量"
-        :speed="readSpeed"
-        :change="readChange"
-        type="read"
-        :interval-sec="intervalSec"
-      />
-      <SpeedCard
-        label="写入量"
-        :speed="writeSpeed"
-        :change="writeChange"
-        type="write"
-        :interval-sec="intervalSec"
-      />
+    <!-- Tab 切换 -->
+    <div class="tab-bar">
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'realtime' }"
+        @click="onTabChange('realtime')"
+      >
+        实时统计
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'total' }"
+        @click="onTabChange('total')"
+      >
+        总量统计
+      </button>
     </div>
 
-    <!-- 实时曲线图 -->
-    <div class="chart-section card">
-      <SpeedChart :data="historyData" :interval-sec="intervalSec" />
-    </div>
+    <!-- 实时统计页面 -->
+    <template v-if="activeTab === 'realtime'">
+      <div class="speed-cards">
+        <SpeedCard
+          label="读取量"
+          :speed="readSpeed"
+          :change="readChange"
+          type="read"
+          :interval-sec="intervalSec"
+        />
+        <SpeedCard
+          label="写入量"
+          :speed="writeSpeed"
+          :change="writeChange"
+          type="write"
+          :interval-sec="intervalSec"
+        />
+      </div>
 
-    <!-- 进程列表 -->
-    <div class="process-section card">
-      <ProcessList :processes="processes" :interval-sec="intervalSec" />
-    </div>
+      <div class="chart-section card">
+        <SpeedChart :data="historyData" :interval-sec="intervalSec" />
+      </div>
+
+      <div class="process-section card">
+        <ProcessList :processes="processes" :interval-sec="intervalSec" />
+      </div>
+    </template>
+
+    <!-- 总量统计页面 -->
+    <template v-else>
+      <StatsToolbar
+        :selected-range="selectedRange"
+        @range-change="onRangeChange"
+        @clear="showClearConfirm = true"
+      />
+
+      <div class="speed-cards" v-if="statsData">
+        <StatsSummaryCard
+          label="读取总量"
+          :bytes="statsData.totalReadBytes"
+          :range-label="statsData.rangeLabel"
+          type="read"
+        />
+        <StatsSummaryCard
+          label="写入总量"
+          :bytes="statsData.totalWriteBytes"
+          :range-label="statsData.rangeLabel"
+          type="write"
+        />
+      </div>
+
+      <div class="chart-section card" v-if="statsData">
+        <StatsChart :data="statsData.chartBuckets" />
+      </div>
+
+      <div class="process-section card" v-if="statsData">
+        <StatsProcessList :processes="statsData.processes" />
+      </div>
+    </template>
 
     <!-- 设置面板 -->
     <SettingsPanel
@@ -135,6 +228,16 @@ async function onSettingsConfirm(sec: number) {
       :current-interval="currentInterval"
       @close="showSettings = false"
       @confirm="onSettingsConfirm"
+    />
+
+    <!-- 清除确认弹窗 -->
+    <ConfirmDialog
+      :visible="showClearConfirm"
+      title="清除统计"
+      message="此操作将清除所有历史统计数据，且不可恢复。确定从零开始统计吗？"
+      confirm-text="清除"
+      @close="showClearConfirm = false"
+      @confirm="onClearStats"
     />
   </div>
 </template>
@@ -185,6 +288,47 @@ async function onSettingsConfirm(sec: number) {
   color: var(--accent-green);
   border-color: rgba(63, 185, 80, 0.3);
   background: rgba(63, 185, 80, 0.08);
+}
+
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  padding: 0 2px;
+}
+
+.tab-btn {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.tab-btn.active {
+  color: var(--accent-blue);
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 2px;
+  background: var(--accent-blue);
+  border-radius: 1px;
 }
 
 .speed-cards {

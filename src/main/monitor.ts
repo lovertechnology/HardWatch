@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
+import { app } from 'electron'
 import { logger } from './logger'
 
 export interface DiskInfo {
@@ -32,7 +33,8 @@ interface ProcessRawData {
   writeBytes: number  // 累计写入字节数
 }
 
-const SCRIPT_DIR = join(__dirname, '../../scripts')
+// 运行时脚本目录：使用 userData 下的 scripts 目录（打包后 asar 内只读，必须用可写路径）
+const SCRIPT_DIR = join(app.getPath('userData'), 'scripts')
 const DEFAULT_INTERVAL = 2
 
 function ensureScriptDir(): void {
@@ -42,14 +44,12 @@ function ensureScriptDir(): void {
 }
 
 function getDiskListScript(): string {
+  ensureScriptDir()
   const path = join(SCRIPT_DIR, 'get-disks.ps1')
-  if (!existsSync(path)) {
-    ensureScriptDir()
-    writeFileSync(
-      path,
-      `Get-CimInstance Win32_LogicalDisk | Where-Object {$_.DriveType -eq 3} | Select-Object DeviceID,VolumeName | ConvertTo-Json`
-    )
-  }
+  writeFileSync(
+    path,
+    `Get-CimInstance Win32_LogicalDisk | Where-Object {$_.DriveType -eq 3} | Select-Object DeviceID,VolumeName | ConvertTo-Json`
+  )
   return path
 }
 
@@ -59,13 +59,20 @@ function getDiskListScript(): string {
 function getCollectScript(diskInstanceName: string, diskLetter: string): string {
   const path = join(SCRIPT_DIR, 'collect-all.ps1')
   ensureScriptDir()
-  writeFileSync(
-    path,
-    `$result = @{}
+  // 注意：使用 .replace() 而非模板字符串来注入参数，避免 PS 的 $ 与 TS 的 ${} 冲突
+  const script = COLLECT_SCRIPT_TEMPLATE
+    .replaceAll('__DISK_INSTANCE__', diskInstanceName)
+    .replaceAll('__DISK_LETTER__', diskLetter)
+  writeFileSync(path, script)
+  return path
+}
+
+// 采集脚本模板：__DISK_INSTANCE__ 和 __DISK_LETTER__ 为运行时替换的占位符
+const COLLECT_SCRIPT_TEMPLATE = `$result = @{}
 
 # Disk I/O rate via Get-Counter (more reliable than Win32_PerfFormattedData)
-$readCounter = '\\PhysicalDisk(${diskInstanceName})\\Disk Read Bytes/sec'
-$writeCounter = '\\PhysicalDisk(${diskInstanceName})\\Disk Write Bytes/sec'
+$readCounter = '\\PhysicalDisk(__DISK_INSTANCE__)\\Disk Read Bytes/sec'
+$writeCounter = '\\PhysicalDisk(__DISK_INSTANCE__)\\Disk Write Bytes/sec'
 try {
     $samples = Get-Counter -Counter $readCounter, $writeCounter -SampleInterval 1 -MaxSamples 1 -ErrorAction Stop
     foreach ($cs in $samples.CounterSamples) {
@@ -77,10 +84,23 @@ try {
     $result.DiskWriteBytesPersec = 0
 }
 
-# Process executable path mapping (PID -> path)
-$paths = @{}
-Get-CimInstance Win32_Process -Property ProcessId,ExecutablePath | Where-Object {$_.ProcessId -gt 4} | ForEach-Object {
-    if ($_.ExecutablePath) { $paths[$_.ProcessId] = $_.ExecutablePath }
+# Process drive mapping: determine which drives each process is likely using
+# Signals: ExecutablePath, CommandLine references
+# System processes (no exe path) mostly operate on C: (system dirs), show only on C:
+# NOTE: Use string keys for PID to avoid uint32/int32 type mismatch with wmic
+$procInfo = @{}
+Get-CimInstance Win32_Process -Property ProcessId,ExecutablePath,CommandLine | Where-Object {$_.ProcessId -gt 4} | ForEach-Object {
+    $drives = @{}
+    if ($_.ExecutablePath -and $_.ExecutablePath -match '^([A-Z]):') {
+        $drives[$Matches[1]] = $true
+    }
+    if ($_.CommandLine) {
+        foreach ($m in [regex]::Matches($_.CommandLine, '([A-Z]):\\\\')) {
+            $drives[$m.Groups[1].Value] = $true
+        }
+    }
+    $key = "$($_.ProcessId)"
+    $procInfo[$key] = @{Exe=$_.ExecutablePath; Drives=@($drives.Keys); NoPath=(-not $_.ExecutablePath)}
 }
 
 # Process I/O cumulative counters (CSV format)
@@ -99,10 +119,17 @@ foreach ($line in $lines) {
         $wb = if ($parts[4].Trim() -match '^\\d+$') { [int64]$parts[4].Trim() } else { 0 }
         if ($name -and $pidStr -match '^\\d+$' -and ($rb -gt 0 -or $wb -gt 0)) {
             $procId = [int]$pidStr
-            $exePath = $paths[$procId]
+            $lookupKey = "$procId"
+            $info = $procInfo[$lookupKey]
             $onDrive = $false
-            if ($exePath -and $exePath.StartsWith('${diskLetter}:')) { $onDrive = $true }
-            if (-not $exePath) { $onDrive = $true }
+            if ($info) {
+                # System processes without exe path: only show on C: (they operate on C:\\\\Windows)
+                if ($info.NoPath -and '__DISK_LETTER__' -eq 'C') { $onDrive = $true }
+                # Exe on the target drive
+                if ($info.Exe -and $info.Exe.StartsWith('__DISK_LETTER__:')) { $onDrive = $true }
+                # CommandLine references the target drive
+                if ($info.Drives -contains '__DISK_LETTER__') { $onDrive = $true }
+            }
             if ($onDrive) {
                 $procs += @{N=$name; P=$procId; R=$rb; W=$wb}
             }
@@ -112,18 +139,14 @@ foreach ($line in $lines) {
 $result.Procs = $procs
 
 $result | ConvertTo-Json -Depth 3 -Compress`
-  )
-  return path
-}
 
 // 获取盘符到 PhysicalDisk 实例名的映射
 function getDiskMappingScript(): string {
+  ensureScriptDir()
   const path = join(SCRIPT_DIR, 'disk-mapping.ps1')
-  if (!existsSync(path)) {
-    ensureScriptDir()
-    writeFileSync(
-      path,
-      `$map = @{}
+  writeFileSync(
+    path,
+    `$map = @{}
 $physDisks = Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk
 foreach ($pd in $physDisks) {
     $name = $pd.Name
@@ -137,8 +160,7 @@ foreach ($pd in $physDisks) {
     }
 }
 $map | ConvertTo-Json`
-    )
-  }
+  )
   return path
 }
 

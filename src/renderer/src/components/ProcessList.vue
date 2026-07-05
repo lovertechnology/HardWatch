@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { ProcessIO } from '../env'
 
 const props = defineProps<{
@@ -38,12 +38,48 @@ const maxTotalSpeed = computed(() => {
     return total > max ? total : max
   }, 0)
 })
+
+// 右键菜单
+const contextMenu = ref<{ visible: boolean; x: number; y: number; pid: number }>({
+  visible: false, x: 0, y: 0, pid: 0
+})
+
+function onContextMenu(e: MouseEvent, proc: ProcessIO) {
+  e.preventDefault()
+  contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, pid: proc.pid }
+}
+
+function closeContextMenu() {
+  contextMenu.value.visible = false
+}
+
+async function openInExplorer() {
+  const pid = contextMenu.value.pid
+  closeContextMenu()
+  await window.api.openProcessLocation(pid)
+}
+
+function onGlobalClick() {
+  if (contextMenu.value.visible) closeContextMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('click', onGlobalClick)
+})
+onUnmounted(() => {
+  document.removeEventListener('click', onGlobalClick)
+})
 </script>
 
 <template>
   <div class="process-container">
     <div class="process-header">
-      <span class="process-title">进程读写详情</span>
+      <div class="process-title-row">
+        <span class="process-title">进程读写详情</span>
+        <span class="process-hint" title="进程列表按盘符筛选（exe路径/命令行引用），但读写量为该进程在所有盘符的全局总量，Windows 未提供按盘符拆分的进程级 I/O 接口">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        </span>
+      </div>
       <span class="process-count">{{ activeProcesses.length }} 个活跃进程</span>
     </div>
     <div class="table-wrapper">
@@ -58,7 +94,12 @@ const maxTotalSpeed = computed(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="proc in activeProcesses" :key="proc.pid" class="fade-in">
+          <tr
+            v-for="proc in activeProcesses"
+            :key="proc.pid"
+            class="fade-in"
+            @contextmenu="onContextMenu($event, proc)"
+          >
             <td class="col-name">
               <span class="process-name">{{ proc.name }}</span>
             </td>
@@ -94,6 +135,23 @@ const maxTotalSpeed = computed(() => {
         <p>暂无活跃的读写进程</p>
       </div>
     </div>
+
+    <!-- 右键菜单 -->
+    <Transition name="ctx-fade">
+      <div
+        v-if="contextMenu.visible"
+        class="context-menu"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+        @click.stop
+      >
+        <button class="ctx-item" @click="openInExplorer">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+          </svg>
+          在文件浏览器中打开
+        </button>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -115,6 +173,25 @@ const maxTotalSpeed = computed(() => {
   font-size: 13px;
   color: var(--text-secondary);
   font-weight: 500;
+}
+
+.process-title-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.process-hint {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  cursor: help;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.process-hint:hover {
+  opacity: 1;
 }
 
 .process-count {
@@ -200,5 +277,53 @@ const maxTotalSpeed = computed(() => {
   padding: 40px 0;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 180px;
+  background: rgba(28, 33, 40, 0.92);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.ctx-item:hover {
+  background: var(--accent-blue);
+  color: #fff;
+}
+
+.ctx-fade-enter-active {
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ctx-fade-leave-active {
+  transition: all 0.1s ease-in;
+}
+.ctx-fade-enter-from {
+  opacity: 0;
+  transform: scale(0.95);
+}
+.ctx-fade-leave-to {
+  opacity: 0;
 }
 </style>

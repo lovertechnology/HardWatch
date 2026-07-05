@@ -14,10 +14,23 @@ try {
     $result.DiskWriteBytesPersec = 0
 }
 
-# Process executable path mapping (PID -> path)
-$paths = @{}
-Get-CimInstance Win32_Process -Property ProcessId,ExecutablePath | Where-Object {$_.ProcessId -gt 4} | ForEach-Object {
-    if ($_.ExecutablePath) { $paths[$_.ProcessId] = $_.ExecutablePath }
+# Process drive mapping: determine which drives each process is likely using
+# Signals: ExecutablePath, CommandLine references
+# System processes (no exe path) mostly operate on C: (system dirs), show only on C:
+# NOTE: Use string keys for PID to avoid uint32/int32 type mismatch with wmic
+$procInfo = @{}
+Get-CimInstance Win32_Process -Property ProcessId,ExecutablePath,CommandLine | Where-Object {$_.ProcessId -gt 4} | ForEach-Object {
+    $drives = @{}
+    if ($_.ExecutablePath -and $_.ExecutablePath -match '^([A-Z]):') {
+        $drives[$Matches[1]] = $true
+    }
+    if ($_.CommandLine) {
+        foreach ($m in [regex]::Matches($_.CommandLine, '([A-Z]):\\')) {
+            $drives[$m.Groups[1].Value] = $true
+        }
+    }
+    $key = "$($_.ProcessId)"
+    $procInfo[$key] = @{Exe=$_.ExecutablePath; Drives=@($drives.Keys); NoPath=(-not $_.ExecutablePath)}
 }
 
 # Process I/O cumulative counters (CSV format)
@@ -36,10 +49,17 @@ foreach ($line in $lines) {
         $wb = if ($parts[4].Trim() -match '^\d+$') { [int64]$parts[4].Trim() } else { 0 }
         if ($name -and $pidStr -match '^\d+$' -and ($rb -gt 0 -or $wb -gt 0)) {
             $procId = [int]$pidStr
-            $exePath = $paths[$procId]
+            $lookupKey = "$procId"
+            $info = $procInfo[$lookupKey]
             $onDrive = $false
-            if ($exePath -and $exePath.StartsWith('C:')) { $onDrive = $true }
-            if (-not $exePath) { $onDrive = $true }
+            if ($info) {
+                # System processes without exe path: only show on C: (they operate on C:\\Windows)
+                if ($info.NoPath -and 'C' -eq 'C') { $onDrive = $true }
+                # Exe on the target drive
+                if ($info.Exe -and $info.Exe.StartsWith('C:')) { $onDrive = $true }
+                # CommandLine references the target drive
+                if ($info.Drives -contains 'C') { $onDrive = $true }
+            }
             if ($onDrive) {
                 $procs += @{N=$name; P=$procId; R=$rb; W=$wb}
             }

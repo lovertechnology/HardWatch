@@ -20,12 +20,36 @@ export interface DiskData {
   intervalSec: number
 }
 
+export interface StatsProcess {
+  name: string
+  readBytes: number
+  writeBytes: number
+}
+
+export interface StatsChartBucket {
+  label: string
+  readBytes: number
+  writeBytes: number
+}
+
+export interface TotalStatsData {
+  totalReadBytes: number
+  totalWriteBytes: number
+  processes: StatsProcess[]
+  chartBuckets: StatsChartBucket[]
+  rangeLabel: string
+}
+
 export interface ElectronAPI {
   getDisks: () => Promise<DiskInfo[]>
   startMonitor: (diskName: string) => Promise<boolean>
   stopMonitor: () => Promise<boolean>
   updateInterval: (sec: number) => Promise<boolean>
   getInterval: () => Promise<number>
+  queryStats: (range: string) => Promise<TotalStatsData>
+  clearStats: () => Promise<boolean>
+  openProcessLocation: (pid: number) => Promise<boolean>
+  openProcessLocationByName: (name: string) => Promise<boolean>
   onDiskData: (callback: (data: DiskData) => void) => () => void
 }
 
