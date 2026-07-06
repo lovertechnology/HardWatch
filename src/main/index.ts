@@ -2,7 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { spawn } from 'child_process'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { DiskMonitor } from './monitor'
+import { DiskMonitor, listPhysicalDisks } from './monitor'
 import { TotalStatsAccumulator } from './statsAccumulator'
 import { logger } from './logger'
 
@@ -52,16 +52,15 @@ function createWindow(): void {
 // IPC handlers
 ipcMain.handle('get-disks', async () => {
   logger.info('IPC', 'get-disks 请求')
-  const disks = await new DiskMonitor('').getDisks()
-  return disks
+  return await listPhysicalDisks()
 })
 
-ipcMain.handle('start-monitor', async (_event, diskName: string) => {
-  logger.info('IPC', `start-monitor 请求, 盘符: ${diskName}`)
+ipcMain.handle('start-monitor', async (_event, diskNumber: number) => {
+  logger.info('IPC', `start-monitor 请求, 物理盘号: ${diskNumber}`)
   if (monitor) {
     monitor.stop()
   }
-  monitor = new DiskMonitor(diskName)
+  monitor = new DiskMonitor(diskNumber)
   monitor.start((data) => {
     // 累加到总量统计
     if (statsAccumulator) {

@@ -17,6 +17,11 @@ Thumbs.db
 # Build
 release/
 
+# C# Tracer build artifacts
+tracer/bin/
+tracer/obj/
+tracer/publish/
+
 # Local helpers
 HardWatch.lnk
 .build-version

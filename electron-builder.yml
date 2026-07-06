@@ -2,10 +2,14 @@ appId: com.hardwatch.app
 productName: HardWatch
 directories:
   buildResources: resources
-  output: release/v3
+  output: release/v4
 files:
   - out/**/*
+extraResources:
+  - from: tracer/publish/HardWatch.Tracer.exe
+    to: HardWatch.Tracer.exe
 win:
   target: dir
-  requestedExecutionLevel: asInvoker
-  signAndEditExecutable: false
+  # ETW NT Kernel Logger 需要管理员权限，必须开启 signAndEditExecutable 让 manifest 生效
+  requestedExecutionLevel: requireAdministrator
+  signAndEditExecutable: true

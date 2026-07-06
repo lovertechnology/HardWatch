@@ -13,7 +13,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import type { DiskInfo, DiskData, TotalStatsData } from './env'
 
 const disks = ref<DiskInfo[]>([])
-const selectedDisk = ref('')
+const selectedDisk = ref<number>(-1)
 const diskData = ref<DiskData | null>(null)
 const historyData = ref<{ readSpeed: number; writeSpeed: number; timestamp: number }[]>([])
 const isMonitoring = ref(false)
@@ -42,7 +42,7 @@ const intervalSec = computed(() => diskData.value?.intervalSec ?? currentInterva
 onMounted(async () => {
   disks.value = await window.api.getDisks()
   if (disks.value.length > 0) {
-    selectedDisk.value = disks.value[0].letter
+    selectedDisk.value = disks.value[0].number
     startMonitor()
   }
 })
@@ -52,7 +52,7 @@ onUnmounted(() => {
 })
 
 async function startMonitor() {
-  if (!selectedDisk.value) return
+  if (selectedDisk.value < 0) return
   stopMonitor()
   historyData.value = []
   isMonitoring.value = true
@@ -79,8 +79,8 @@ function stopMonitor() {
   isMonitoring.value = false
 }
 
-async function onDiskChange(letter: string) {
-  selectedDisk.value = letter
+async function onDiskChange(diskNumber: number) {
+  selectedDisk.value = diskNumber
   await startMonitor()
 }
 

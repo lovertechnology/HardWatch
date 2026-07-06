@@ -1,6 +1,7 @@
 export interface DiskInfo {
-  name: string
-  letter: string
+  number: number      // 物理盘号
+  name: string        // 物理盘型号
+  sizeBytes: number
 }
 
 export interface ProcessIO {
@@ -42,7 +43,7 @@ export interface TotalStatsData {
 
 export interface ElectronAPI {
   getDisks: () => Promise<DiskInfo[]>
-  startMonitor: (diskName: string) => Promise<boolean>
+  startMonitor: (diskNumber: number) => Promise<boolean>
   stopMonitor: () => Promise<boolean>
   updateInterval: (sec: number) => Promise<boolean>
   getInterval: () => Promise<number>

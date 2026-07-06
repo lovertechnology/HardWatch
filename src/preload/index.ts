@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('api', {
   getDisks: () => ipcRenderer.invoke('get-disks'),
-  startMonitor: (diskName: string) => ipcRenderer.invoke('start-monitor', diskName),
+  startMonitor: (diskNumber: number) => ipcRenderer.invoke('start-monitor', diskNumber),
   stopMonitor: () => ipcRenderer.invoke('stop-monitor'),
   updateInterval: (sec: number) => ipcRenderer.invoke('update-interval', sec),
   getInterval: () => ipcRenderer.invoke('get-interval'),
