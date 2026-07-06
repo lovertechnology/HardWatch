@@ -8,12 +8,37 @@ const props = defineProps<{
 
 const maxTotal = computed(() => {
   if (props.processes.length === 0) return 1
-  const top = props.processes[0]
-  return top.readBytes + top.writeBytes || 1
+  return props.processes.reduce((max, p) => {
+    const total = p.readBytes + p.writeBytes
+    return total > max ? total : max
+  }, 0) || 1
 })
 
 const totalAll = computed(() => {
   return props.processes.reduce((sum, p) => sum + p.readBytes + p.writeBytes, 0)
+})
+
+// 表头排序
+type SortKey = 'name' | 'readBytes' | 'writeBytes' | 'total'
+const sortKey = ref<SortKey>('total')
+const sortOrder = ref<'asc' | 'desc'>('desc')
+
+function sortBy(key: SortKey) {
+  if (sortKey.value === key) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = key
+    sortOrder.value = key === 'name' ? 'asc' : 'desc'
+  }
+}
+
+const sortedProcesses = computed(() => {
+  const dir = sortOrder.value === 'asc' ? 1 : -1
+  return [...props.processes].sort((a, b) => {
+    if (sortKey.value === 'name') return a.name.toLowerCase().localeCompare(b.name.toLowerCase()) * dir
+    if (sortKey.value === 'total') return ((a.readBytes + a.writeBytes) - (b.readBytes + b.writeBytes)) * dir
+    return ((a[sortKey.value] as number) - (b[sortKey.value] as number)) * dir
+  })
 })
 
 function formatBytes(bytes: number): string {
@@ -93,16 +118,28 @@ onUnmounted(() => {
       <table>
         <thead>
           <tr>
-            <th class="col-name">进程名</th>
-            <th class="col-num">累计读取</th>
-            <th class="col-num">累计写入</th>
-            <th class="col-num">总量</th>
+            <th class="col-name sortable" @click="sortBy('name')">
+              进程名
+              <span class="sort-arrow" :class="{ active: sortKey === 'name' }">{{ sortKey === 'name' ? (sortOrder === 'asc' ? '▲' : '▼') : '↕' }}</span>
+            </th>
+            <th class="col-num sortable" @click="sortBy('readBytes')">
+              累计读取
+              <span class="sort-arrow" :class="{ active: sortKey === 'readBytes' }">{{ sortKey === 'readBytes' ? (sortOrder === 'asc' ? '▲' : '▼') : '↕' }}</span>
+            </th>
+            <th class="col-num sortable" @click="sortBy('writeBytes')">
+              累计写入
+              <span class="sort-arrow" :class="{ active: sortKey === 'writeBytes' }">{{ sortKey === 'writeBytes' ? (sortOrder === 'asc' ? '▲' : '▼') : '↕' }}</span>
+            </th>
+            <th class="col-num sortable" @click="sortBy('total')">
+              总量
+              <span class="sort-arrow" :class="{ active: sortKey === 'total' }">{{ sortKey === 'total' ? (sortOrder === 'asc' ? '▲' : '▼') : '↕' }}</span>
+            </th>
             <th class="col-pct">占比</th>
           </tr>
         </thead>
         <tbody>
           <tr
-            v-for="(p, i) in processes"
+            v-for="(p, i) in sortedProcesses"
             :key="p.name"
             :class="{ 'top-row': i < 3 }"
             @contextmenu="onContextMenu($event, p)"
@@ -209,6 +246,28 @@ td.col-num {
 th.col-pct,
 td.col-pct {
   text-align: right;
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.sortable:hover {
+  color: var(--text-primary);
+}
+
+.sort-arrow {
+  font-size: 9px;
+  margin-left: 3px;
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+.sort-arrow.active {
+  color: var(--accent-blue);
+  opacity: 1;
 }
 
 td {

@@ -19,11 +19,36 @@ function formatIntervalSuffix(sec: number): string {
   return Math.floor(sec / 60) + 'm' + (sec % 60) + 's'
 }
 
-// 只显示有读写活动的进程，按总量降序取前 30
+// 表头排序
+type SortKey = 'name' | 'pid' | 'readBytes' | 'writeBytes' | 'total'
+const sortKey = ref<SortKey>('total')
+const sortOrder = ref<'asc' | 'desc'>('desc')
+
+function sortBy(key: SortKey) {
+  if (sortKey.value === key) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = key
+    sortOrder.value = key === 'name' ? 'asc' : 'desc'
+  }
+}
+
+function sortValue(p: ProcessIO, key: SortKey): number | string {
+  if (key === 'total') return p.readBytes + p.writeBytes
+  if (key === 'name') return p.name.toLowerCase()
+  return p[key]
+}
+
+// 只显示有读写活动的进程，按当前排序键排序
 const activeProcesses = computed(() => {
-  return props.processes
-    .filter((p) => p.readBytes > 0 || p.writeBytes > 0)
-    .slice(0, 30)
+  const list = props.processes.filter((p) => p.readBytes > 0 || p.writeBytes > 0)
+  const dir = sortOrder.value === 'asc' ? 1 : -1
+  return [...list].sort((a, b) => {
+    const va = sortValue(a, sortKey.value)
+    const vb = sortValue(b, sortKey.value)
+    if (typeof va === 'string' && typeof vb === 'string') return va.localeCompare(vb) * dir
+    return ((va as number) - (vb as number)) * dir
+  })
 })
 
 function speedBarWidth(speed: number, maxSpeed: number): string {
@@ -86,10 +111,22 @@ onUnmounted(() => {
       <table v-if="activeProcesses.length > 0">
         <thead>
           <tr>
-            <th class="col-name">进程名</th>
-            <th class="col-pid">PID</th>
-            <th class="col-speed">读取量</th>
-            <th class="col-speed">写入量</th>
+            <th class="col-name sortable" @click="sortBy('name')">
+              进程名
+              <span class="sort-arrow" :class="{ active: sortKey === 'name' }">{{ sortKey === 'name' ? (sortOrder === 'asc' ? '▲' : '▼') : '↕' }}</span>
+            </th>
+            <th class="col-pid sortable" @click="sortBy('pid')">
+              PID
+              <span class="sort-arrow" :class="{ active: sortKey === 'pid' }">{{ sortKey === 'pid' ? (sortOrder === 'asc' ? '▲' : '▼') : '↕' }}</span>
+            </th>
+            <th class="col-speed sortable" @click="sortBy('readBytes')">
+              读取量
+              <span class="sort-arrow" :class="{ active: sortKey === 'readBytes' }">{{ sortKey === 'readBytes' ? (sortOrder === 'asc' ? '▲' : '▼') : '↕' }}</span>
+            </th>
+            <th class="col-speed sortable" @click="sortBy('writeBytes')">
+              写入量
+              <span class="sort-arrow" :class="{ active: sortKey === 'writeBytes' }">{{ sortKey === 'writeBytes' ? (sortOrder === 'asc' ? '▲' : '▼') : '↕' }}</span>
+            </th>
             <th class="col-bar">活动</th>
           </tr>
         </thead>
@@ -216,6 +253,28 @@ onUnmounted(() => {
 }
 .col-bar {
   width: 17%;
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.sortable:hover {
+  color: var(--text-primary);
+}
+
+.sort-arrow {
+  font-size: 9px;
+  margin-left: 3px;
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+.sort-arrow.active {
+  color: var(--accent-blue);
+  opacity: 1;
 }
 
 .process-name {
