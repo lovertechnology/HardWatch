@@ -2,7 +2,7 @@ appId: com.hardwatch.app
 productName: HardWatch
 directories:
   buildResources: resources
-  output: release/v2
+  output: release/v3
 files:
   - out/**/*
 win:

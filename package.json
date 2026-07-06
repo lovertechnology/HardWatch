@@ -1,6 +1,6 @@
 {
   "name": "hardwatch",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "实时监控硬盘读写的桌面端程序",
   "main": "./out/main/index.js",
   "scripts": {

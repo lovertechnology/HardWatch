@@ -55,7 +55,7 @@ function getDiskListScript(): string {
 
 // 采集脚本：用 Get-Counter 获取磁盘速率 + wmic 获取进程 I/O 累计值
 // diskInstanceName: PhysicalDisk 的实例名，如 "2 C: D:"
-// diskLetter: 盘符，如 "C"
+// diskLetter: 盘符，如 "C"（当前版本不再用于进程过滤，仅保留用于未来扩展）
 function getCollectScript(diskInstanceName: string, diskLetter: string): string {
   const path = join(SCRIPT_DIR, 'collect-all.ps1')
   ensureScriptDir()
@@ -84,26 +84,8 @@ try {
     $result.DiskWriteBytesPersec = 0
 }
 
-# Process drive mapping: determine which drives each process is likely using
-# Signals: ExecutablePath, CommandLine references
-# System processes (no exe path) mostly operate on C: (system dirs), show only on C:
-# NOTE: Use string keys for PID to avoid uint32/int32 type mismatch with wmic
-$procInfo = @{}
-Get-CimInstance Win32_Process -Property ProcessId,ExecutablePath,CommandLine | Where-Object {$_.ProcessId -gt 4} | ForEach-Object {
-    $drives = @{}
-    if ($_.ExecutablePath -and $_.ExecutablePath -match '^([A-Z]):') {
-        $drives[$Matches[1]] = $true
-    }
-    if ($_.CommandLine) {
-        foreach ($m in [regex]::Matches($_.CommandLine, '([A-Z]):\\\\')) {
-            $drives[$m.Groups[1].Value] = $true
-        }
-    }
-    $key = "$($_.ProcessId)"
-    $procInfo[$key] = @{Exe=$_.ExecutablePath; Drives=@($drives.Keys); NoPath=(-not $_.ExecutablePath)}
-}
-
 # Process I/O cumulative counters (CSV format)
+# NOTE: 当前版本不再按盘符筛选进程，进程 I/O 为全局总量
 $lines = wmic process where "ProcessId>4" get Name,ProcessId,ReadTransferCount,WriteTransferCount /format:csv 2>$null
 $procs = @()
 $headerSkipped = $false
@@ -119,20 +101,7 @@ foreach ($line in $lines) {
         $wb = if ($parts[4].Trim() -match '^\\d+$') { [int64]$parts[4].Trim() } else { 0 }
         if ($name -and $pidStr -match '^\\d+$' -and ($rb -gt 0 -or $wb -gt 0)) {
             $procId = [int]$pidStr
-            $lookupKey = "$procId"
-            $info = $procInfo[$lookupKey]
-            $onDrive = $false
-            if ($info) {
-                # System processes without exe path: only show on C: (they operate on C:\\\\Windows)
-                if ($info.NoPath -and '__DISK_LETTER__' -eq 'C') { $onDrive = $true }
-                # Exe on the target drive
-                if ($info.Exe -and $info.Exe.StartsWith('__DISK_LETTER__:')) { $onDrive = $true }
-                # CommandLine references the target drive
-                if ($info.Drives -contains '__DISK_LETTER__') { $onDrive = $true }
-            }
-            if ($onDrive) {
-                $procs += @{N=$name; P=$procId; R=$rb; W=$wb}
-            }
+            $procs += @{N=$name; P=$procId; R=$rb; W=$wb}
         }
     }
 }

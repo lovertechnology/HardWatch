@@ -101,7 +101,7 @@ onUnmounted(() => {
     <div class="process-header">
       <div class="process-title-row">
         <span class="process-title">进程读写详情</span>
-        <span class="process-hint" title="进程列表按盘符筛选（exe路径/命令行引用），但读写量为该进程在所有盘符的全局总量，Windows 未提供按盘符拆分的进程级 I/O 接口">
+        <span class="process-hint" title="读写量为该进程在所有盘符的全局总量，Windows 未提供按盘符拆分的进程级 I/O 接口">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
         </span>
       </div>
