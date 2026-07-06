@@ -2,12 +2,13 @@ appId: com.hardwatch.app
 productName: HardWatch
 directories:
   buildResources: resources
-  output: release/v4
+  output: release/v6
 files:
   - out/**/*
 extraResources:
-  - from: tracer/publish/HardWatch.Tracer.exe
-    to: HardWatch.Tracer.exe
+  - from: tracer/publish
+    to: tracer
+    filter: ["**/*", "!**/*.pdb"]
 win:
   target: dir
   # ETW NT Kernel Logger 需要管理员权限，必须开启 signAndEditExecutable 让 manifest 生效

@@ -34,8 +34,8 @@ function getTracerPath(): string {
   if (existsSync(devPath)) {
     return devPath
   }
-  // 打包后：process.resourcesPath/HardWatch.Tracer.exe（extraResources 配置）
-  const prodPath = join(process.resourcesPath, 'HardWatch.Tracer.exe')
+  // 打包后：process.resourcesPath/tracer/HardWatch.Tracer.exe
+  const prodPath = join(process.resourcesPath, 'tracer', 'HardWatch.Tracer.exe')
   if (existsSync(prodPath)) {
     return prodPath
   }
