@@ -1,7 +1,8 @@
 export interface DiskInfo {
-  number: number      // 物理盘号
+  number: number      // 物理盘号（-1 表示全部）
   name: string        // 物理盘型号
   sizeBytes: number
+  letters: string[]   // 该物理盘对应的所有盘符（如 ['C:', 'D:']）
 }
 
 export interface ProcessIO {

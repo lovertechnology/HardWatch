@@ -86,7 +86,8 @@ export async function listPhysicalDisks(): Promise<DiskInfo[]> {
             const disks: DiskInfo[] = parsed.disks.map((d: any) => ({
               number: Number(d.number),
               name: String(d.name || `Disk ${d.number}`),
-              sizeBytes: Number(d.sizeBytes) || 0
+              sizeBytes: Number(d.sizeBytes) || 0,
+              letters: Array.isArray(d.letters) ? d.letters.map((l: any) => String(l)) : []
             }))
             logger.info('Monitor:listDisks', `找到 ${disks.length} 个物理盘: ${disks.map(d => `${d.number}=${d.name}`).join(', ')}`)
             resolve(disks)

@@ -21,8 +21,9 @@ defineExpose({}) // ensure component is properly handled
       :value="selected"
       @change="emit('change', Number(($event.target as HTMLSelectElement).value))"
     >
+      <option :value="-1">全部物理硬盘</option>
       <option v-for="disk in disks" :key="disk.number" :value="disk.number">
-        {{ disk.name }}
+        {{ disk.name }}<span v-if="disk.letters && disk.letters.length"> ({{ disk.letters.join(', ') }})</span>
       </option>
     </select>
     <button class="settings-btn" @click="$emit('settings')" title="设置">

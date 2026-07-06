@@ -125,7 +125,7 @@ internal class Program
     }
 
     /// <summary>
-    /// 通过 WMI 查询物理硬盘列表
+    /// 通过 WMI 查询物理硬盘列表，包含每个物理盘对应的所有盘符
     /// </summary>
     private static async Task OutputDisksAsync()
     {
@@ -133,24 +133,81 @@ internal class Program
 
         try
         {
-            using var searcher = new ManagementObjectSearcher(
-                "SELECT Index,Model,Size,MediaType FROM Win32_DiskDrive");
-            foreach (var mo in searcher.Get().Cast<ManagementObject>())
+            // 查询物理盘
+            var diskMap = new Dictionary<int, (string model, long size)>();
+            using (var searcher = new ManagementObjectSearcher(
+                "SELECT Index,Model,Size FROM Win32_DiskDrive"))
             {
-                var idx = Convert.ToInt32(mo["Index"]);
-                var model = mo["Model"]?.ToString() ?? $"Disk {idx}";
-                var sizeBytes = mo["Size"] != null ? Convert.ToInt64(mo["Size"]) : 0;
+                foreach (var mo in searcher.Get().Cast<ManagementObject>())
+                {
+                    var idx = Convert.ToInt32(mo["Index"]);
+                    var model = mo["Model"]?.ToString() ?? $"Disk {idx}";
+                    var sizeBytes = mo["Size"] != null ? Convert.ToInt64(mo["Size"]) : 0;
+                    diskMap[idx] = (model, sizeBytes);
+                }
+            }
+
+            // 查询 物理盘号 → 盘符列表 映射
+            // 链路：Win32_DiskDrive (Index) -> Win32_DiskDriveToDiskPartition -> Win32_DiskPartition (DiskIndex) -> Win32_LogicalDiskToPartition -> Win32_LogicalDisk (DeviceID)
+            var diskToLetters = new Dictionary<int, List<string>>();
+            using (var partitionSearcher = new ManagementObjectSearcher(
+                "SELECT DiskIndex,DeviceID FROM Win32_DiskPartition"))
+            {
+                var partitionToDisk = new Dictionary<string, int>();
+                foreach (var mo in partitionSearcher.Get().Cast<ManagementObject>())
+                {
+                    var diskIdx = Convert.ToInt32(mo["DiskIndex"]);
+                    var partId = mo["DeviceID"]?.ToString() ?? "";
+                    if (!string.IsNullOrEmpty(partId))
+                        partitionToDisk[partId] = diskIdx;
+                }
+
+                using var ldSearcher = new ManagementObjectSearcher(
+                    "ASSOCIATORS OF {Win32_LogicalDisk} WHERE ResultClass=Win32_DiskPartition");
+                // 改用 Win32_LogicalDiskToPartition 关联类
+                using var assocSearcher = new ManagementObjectSearcher(
+                    "SELECT Antecedent,Dependent FROM Win32_LogicalDiskToPartition");
+                foreach (var mo in assocSearcher.Get().Cast<ManagementObject>())
+                {
+                    // Antecedent 是 Win32_DiskPartition，Dependent 是 Win32_LogicalDisk
+                    var ant = mo["Antecedent"]?.ToString() ?? "";
+                    var dep = mo["Dependent"]?.ToString() ?? "";
+                    // 解析 DeviceID="磁盘 #0, #0" 和 DeviceID="C:"
+                    var partMatch = System.Text.RegularExpressions.Regex.Match(ant, @"DeviceID=""([^""]+)""");
+                    var letterMatch = System.Text.RegularExpressions.Regex.Match(dep, @"DeviceID=""([^""]+)""");
+                    if (partMatch.Success && letterMatch.Success)
+                    {
+                        var partId = partMatch.Groups[1].Value;
+                        var letter = letterMatch.Groups[1].Value;
+                        if (partitionToDisk.TryGetValue(partId, out var diskIdx))
+                        {
+                            if (!diskToLetters.TryGetValue(diskIdx, out var list))
+                            {
+                                list = new List<string>();
+                                diskToLetters[diskIdx] = list;
+                            }
+                            if (!list.Contains(letter)) list.Add(letter);
+                        }
+                    }
+                }
+            }
+
+            // 组装输出
+            foreach (var kv in diskMap.OrderBy(x => x.Key))
+            {
+                var letters = diskToLetters.TryGetValue(kv.Key, out var l) ? l : new List<string>();
                 disks.Add(new
                 {
-                    number = idx,
-                    name = model,
-                    sizeBytes = sizeBytes
+                    number = kv.Key,
+                    name = kv.Value.model,
+                    sizeBytes = kv.Value.size,
+                    letters = letters.OrderBy(x => x).ToList()
                 });
             }
         }
         catch (Exception ex)
         {
-            disks.Add(new { number = -1, name = "查询失败：" + ex.Message, sizeBytes = 0L });
+            disks.Add(new { number = -1, name = "查询失败：" + ex.Message, sizeBytes = 0L, letters = new List<string>() });
         }
 
         var payload = new
@@ -162,7 +219,9 @@ internal class Program
     }
 
     /// <summary>
-    /// 预加载当前所有进程的 PID→Name 映射
+    /// 预加载当前所有进程的 PID→Name 和 ThreadID→PID 映射
+    /// 关键：ETW ThreadStart 只能捕获新线程，已存在的线程必须通过 Process.Threads 预加载
+    /// 否则启动后已运行进程的磁盘 I/O 无法关联到 PID
     /// </summary>
     private static void PreloadProcesses()
     {
@@ -173,12 +232,18 @@ internal class Program
                 try
                 {
                     s_pidToName[p.Id] = p.ProcessName + ".exe";
+                    // 关键：遍历进程的所有线程，建立 ThreadID → PID 映射
+                    foreach (System.Diagnostics.ProcessThread t in p.Threads)
+                    {
+                        s_threadToPid[t.Id] = p.Id;
+                    }
                 }
                 catch
                 {
-                    // 跳过无法访问的进程
+                    // 跳过无法访问的进程（如 SYSTEM 进程）
                 }
             }
+            Console.Error.WriteLine($"[Tracer] Preloaded {s_pidToName.Count} processes, {s_threadToPid.Count} thread mappings");
         }
     }
 
@@ -255,10 +320,11 @@ internal class Program
                     ds = (0, 0);
                 s_diskStats[diskNum] = (ds.read + data.TransferSize, ds.write);
 
-                // 进程聚合（按物理盘过滤）
-                if (diskNum == s_diskNumber && s_threadToPid.TryGetValue((int)data.ThreadID, out var pid))
+                // 进程聚合：diskNumber=-1 表示全部，按 pid 汇总；否则按 (pid, diskNum)
+                if ((s_diskNumber < 0 || diskNum == s_diskNumber) &&
+                    s_threadToPid.TryGetValue((int)data.ThreadID, out var pid))
                 {
-                    var key = (pid, diskNum);
+                    var key = s_diskNumber < 0 ? (pid, -1) : (pid, diskNum);
                     if (!s_stats.TryGetValue(key, out var st))
                         st = (0, 0);
                     s_stats[key] = (st.read + data.TransferSize, st.write);
@@ -277,10 +343,11 @@ internal class Program
                     ds = (0, 0);
                 s_diskStats[diskNum] = (ds.read, ds.write + data.TransferSize);
 
-                // 进程聚合（按物理盘过滤）
-                if (diskNum == s_diskNumber && s_threadToPid.TryGetValue((int)data.ThreadID, out var pid))
+                // 进程聚合：diskNumber=-1 表示全部，按 pid 汇总；否则按 (pid, diskNum)
+                if ((s_diskNumber < 0 || diskNum == s_diskNumber) &&
+                    s_threadToPid.TryGetValue((int)data.ThreadID, out var pid))
                 {
-                    var key = (pid, diskNum);
+                    var key = s_diskNumber < 0 ? (pid, -1) : (pid, diskNum);
                     if (!s_stats.TryGetValue(key, out var st))
                         st = (0, 0);
                     s_stats[key] = (st.read, st.write + data.TransferSize);
@@ -353,7 +420,16 @@ internal class Program
                 }
                 s_stats.Clear();
 
-                if (s_diskStats.TryGetValue(s_diskNumber, out var ds))
+                // diskNumber=-1 时汇总所有物理盘；否则取指定盘
+                if (s_diskNumber < 0)
+                {
+                    foreach (var kv in s_diskStats)
+                    {
+                        diskRead += kv.Value.read;
+                        diskWrite += kv.Value.write;
+                    }
+                }
+                else if (s_diskStats.TryGetValue(s_diskNumber, out var ds))
                 {
                     diskRead = ds.read;
                     diskWrite = ds.write;

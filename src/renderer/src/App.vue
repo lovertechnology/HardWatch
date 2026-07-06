@@ -41,10 +41,9 @@ const intervalSec = computed(() => diskData.value?.intervalSec ?? currentInterva
 
 onMounted(async () => {
   disks.value = await window.api.getDisks()
-  if (disks.value.length > 0) {
-    selectedDisk.value = disks.value[0].number
-    startMonitor()
-  }
+  // 默认选择"全部"（-1）
+  selectedDisk.value = -1
+  startMonitor()
 })
 
 onUnmounted(() => {
@@ -52,7 +51,6 @@ onUnmounted(() => {
 })
 
 async function startMonitor() {
-  if (selectedDisk.value < 0) return
   stopMonitor()
   historyData.value = []
   isMonitoring.value = true
