@@ -2,10 +2,10 @@ appId: com.hardwatch.app
 productName: HardWatch
 directories:
   buildResources: resources
-  output: release/v0
+  output: release/v2
 files:
   - out/**/*
 win:
   target: dir
-  requestedExecutionLevel: requireAdministrator
+  requestedExecutionLevel: asInvoker
   signAndEditExecutable: false
