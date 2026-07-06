@@ -20,3 +20,6 @@ release/
 # Local helpers
 HardWatch.lnk
 启动.bat
+构建.bat
+build.ps1
+.build-version
